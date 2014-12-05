@@ -98,7 +98,33 @@ module Bitcoin
     #  key1 = Bitcoin::Key.generate
     #  sig = key1.sign("some data")
     def sign(data)
-      @key.dsa_sign_asn1(data)
+      sig = @key.dsa_sign_asn1(data)
+      return sig if Script::is_low_der_signature?(sig)
+
+      # S-value is too high, re-encode it
+      sig = sig.unpack("C*")
+
+      # Get current r and s values from the signature
+      length_r = sig[3]
+      length_s = sig[5+length_r]
+      r_val = sig.slice(4, length_r)
+      s_val = sig.slice(6 + length_r, length_s)
+
+      # Calculate the lower s value
+      s_val = s_val.pack("C*").unpack("H*").first.to_i(16) # Change the array to an integer
+      n = @key.group.order.to_i
+      s_val = n - s_val
+      s_val = s_val.to_s(16).scan(/../).map { |x| x.hex }
+
+      # Re-pack the signature
+      sig = [0x30, 0, 0x02, r_val.size]
+      sig.concat(r_val)
+      sig << 0x02
+      sig << s_val.size
+      sig.concat(s_val)
+      sig[1] = sig.size - 2
+
+      sig.pack("C*")
     end
 
     # Verify signature +sig+ for +data+.
